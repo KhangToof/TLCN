@@ -3,8 +3,9 @@ up:
 	docker compose -f ../superset/docker-compose.yml up -d
 
 down:
-	docker compose down -v
+	docker compose down 
 	docker compose -f ../superset/docker-compose.yml down
 
 restart:
-	down up
+	make down 
+	make up
