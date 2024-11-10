@@ -1,120 +1,77 @@
 services:
-  # Hadoop NameNode
-  namenode:
-    image: bde2020/hadoop-namenode:2.0.0-hadoop2.7.4-java8
-    volumes:
-      - namenode:/hadoop/dfs/name
-    environment:
-      - CLUSTER_NAME=test
-    env_file:
-      - ./presto/hadoop-hive.env
-    ports:
-      - "50070:50070"
-    networks:
-      - iceberg_net
-
-  # Hadoop DataNode
-  datanode:
-    image: bde2020/hadoop-datanode:2.0.0-hadoop2.7.4-java8
-    volumes:
-      - datanode:/hadoop/dfs/data
-    env_file:
-      - ./presto/hadoop-hive.env
-    environment:
-      SERVICE_PRECONDITION: "namenode:50070"
-    ports:
-      - "50075:50075"
-    networks:
-      - iceberg_net
-
-  # Hive Server
-  hive-server:
-    image: bde2020/hive:2.3.2-postgresql-metastore
-    env_file:
-      - ./presto/hadoop-hive.env
-    environment:
-      HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore/metastore"
-      SERVICE_PRECONDITION: "hive-metastore:9083"
-    ports:
-      - "10000:10000"
-    networks:
-      - iceberg_net
-
-  # Hive Metastore
-  hive-metastore:
-    image: bde2020/hive:2.3.2-postgresql-metastore
-    env_file:
-      - ./presto/hadoop-hive.env
-    command: /opt/hive/bin/hive --service metastore
-    environment:
-      SERVICE_PRECONDITION: "namenode:50070 datanode:50075 hive-metastore-postgresql:5432"
-    ports:
-      - "9083:9083"
-    networks:
-      - iceberg_net
-
-  # PostgreSQL for Hive Metastore
-  hive-metastore-postgresql:
-    image: bde2020/hive-metastore-postgresql:2.3.0
-    networks:
-      - iceberg_net
-
-  # Presto Coordinator
-  presto-coordinator:
-    image: shawnzhu/prestodb:0.181
-    ports:
-      - "8100:8080"
-    networks:
-      - iceberg_net
-
-  # Spark with Iceberg
-  spark-iceberg:
-    image: tabulario/spark-iceberg
-    container_name: spark-iceberg
-    build: spark/
-    depends_on:
-      - minio
-    volumes:
-      - ./warehouse:/home/iceberg/warehouse
-    environment:
-      - AWS_ACCESS_KEY_ID=admin
-      - AWS_SECRET_ACCESS_KEY=password
-      - AWS_REGION=us-east-1
-      - SPARK_SQL_CATALOG_IMPLEMENTATION=hive
-      - SPARK_SQL_CATALOG_HIVE.warehouse=s3a://warehouse
-      - SPARK_SQL_CATALOG_HIVE.s3.endpoint=http://minio:9000
-      - SPARK_SQL_CATALOG_HIVE.s3.access-key=admin
-      - SPARK_SQL_CATALOG_HIVE.s3.secret-key=password
-      - SPARK_SQL_CATALOG_HIVE.s3.path-style-access=true
-    ports:
-      - "8888:8888"
-      - "8081:8080" # Spark UI replace
-      - "10002:10000"
-      - "10001:10001"
-    networks:
-      - iceberg_net
-
-  # MinIO for storage
   minio:
     image: minio/minio
     container_name: minio
-    environment:
-      - MINIO_ROOT_USER=admin
-      - MINIO_ROOT_PASSWORD=password
-      - MINIO_DOMAIN=minio
+    env_file:
+      - ./env/minio.env
     volumes:
       - ./storage:/data
-    networks:
-      - iceberg_net
     ports:
-      - "9001:9001"
       - "9000:9000"
-    command: ["server", "/data", "--console-address", ":9001"]
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    networks:
+      - tlcn-network
+
+  postgresdb:
+    image: postgres:15
+    container_name: postgresdb
+    hostname: metastore_db
+    environment:
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+      POSTGRES_DB: metastore
+    volumes:
+      - /data/postgres:/var/lib/postgresql/data
+    networks:
+      - tlcn-network
+
+  # Hive Metastore
+  hive-metastore:
+    container_name: hive-metastore
+    build: ./hive
+    restart: unless-stopped
+    ports:
+      - "9083:9083"
+    networks:
+      - tlcn-network
+
+  # Presto Coordinator
+  presto:
+    container_name: presto
+    build: ./presto/config
+    ports:
+      - "8100:8080"
+    networks:
+      - tlcn-network
+
+  # Spark Service
+  # spark:
+  #   container_name: spark-master
+  #   build: ./spark
+  #   ports:
+  #     - "7077:7077" # Spark master port
+  #     - "8080:8080" # Spark master UI
+  #     - "8081:8081" # Spark UI
+  #   networks:
+  #     - tlcn-network
+    
+
+  # Spark worker
+  # spark-worker:
+  #   container_name: spark-worker
+  #   env_file:
+  #     - ./env/spark.env
+  #   build: .
+  #   networks:
+  #     - iceberg-network
+  #   volumes:
+  #     - ./spark:/spark
+      
+networks:
+  tlcn-network:
+    driver: bridge
+
 
 volumes:
-  namenode:
-  datanode:
-  warehouse:
-
-networks:
-  iceberg_net:
+  storage:
